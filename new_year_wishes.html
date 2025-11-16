@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Оживи карточку 3D</title>
+  <style>
+    body { margin: 0; overflow: hidden; font-family: sans-serif; background: #111; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    h2 { position: absolute; top: 10px; text-align: center; width: 100%; }
+    #status { position: absolute; bottom: 10px; text-align: center; width: 100%; font-size: 1.2em; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <h2>Наведи камеру на карточку</h2>
+  <div id="status">Ищем текст...</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+
+  <script>
+    // ----- Камера -----
+    const video = document.createElement('video');
+    video.autoplay = true;
+    video.playsInline = true;
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      .then(stream => { video.srcObject = stream; })
+      .catch(err => { document.getElementById('status').textContent = 'Ошибка камеры: ' + err; });
+
+    // ----- Three.js сцена -----
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Освещение
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(0, 1, 2);
+    scene.add(light);
+
+    // Текстура из видео (карточка)
+    const videoTexture = new THREE.VideoTexture(video);
+    const geometry = new THREE.PlaneGeometry(3, 2);
+    const material = new THREE.MeshStandardMaterial({ map: videoTexture, side: THREE.DoubleSide });
+    const plane = new THREE.Mesh(geometry, material);
+    scene.add(plane);
+
+    camera.position.z = 5;
+
+    // Анимация 3D (пульс, вращение)
+    let scale = 1, growing = true;
+    function animate() {
+      requestAnimationFrame(animate);
+
+      plane.rotation.y += 0.01;
+      if(growing) { scale += 0.005; if(scale >= 1.1) growing = false; }
+      else { scale -= 0.005; if(scale <= 0.9) growing = true; }
+      plane.scale.set(scale, scale, scale);
+
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // ----- OCR + озвучка -----
+    let lastText = '';
+    async function recognizeAndSpeak() {
+      if(video.readyState < 2) return;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      try {
+        const { data: { text } } = await Tesseract.recognize(canvas, 'rus');
+        const trimmed = text.trim();
+        if(trimmed && trimmed !== lastText){
+          lastText = trimmed;
+          document.getElementById('status').textContent = "Распознано: " + trimmed;
+
+          const utterance = new SpeechSynthesisUtterance(trimmed);
+          utterance.lang = 'ru-RU';
+          // выбираем первый мужской голос
+          const voices = speechSynthesis.getVoices().filter(v => v.lang.startsWith('ru') && v.name.toLowerCase().includes('male'));
+          if(voices.length > 0) utterance.voice = voices[0];
+          speechSynthesis.speak(utterance);
+        }
+      } catch(err) {
+        console.error(err);
+        document.getElementById('status').textContent = 'Ошибка распознавания текста';
+      }
+    }
+
+    setInterval(recognizeAndSpeak, 3000);
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth/window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
